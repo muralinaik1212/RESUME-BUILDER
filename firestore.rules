@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore { match /databases/{db}/documents {
+  function signed() { return request.auth != null; }
+  function me(u) { return signed() && request.auth.uid == u; }
+  function isAdmin() { return signed() && exists(/databases/$(db)/documents/admins/$(request.auth.uid)); }
+  function notBlocked() { return get(/databases/$(db)/documents/users/$(request.auth.uid)).data.blocked != true; }
+
+  match /admins/{u} { allow read: if me(u); }          // admins are added manually in the console
+
+  match /users/{u} {
+    allow read: if me(u) || isAdmin();
+    allow create: if me(u) && request.resource.data.blocked == false;
+    allow update: if (me(u) && request.resource.data.blocked == resource.data.blocked)
+                  || (isAdmin() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['blocked']));
+    allow delete: if me(u);
+    match /resumes/{r} {                                // admin has NO access to resume contents
+      allow read, write: if me(u) && notBlocked();
+      allow delete: if me(u);
+    }
+  }
+  match /stats/{d} {                                    // visitor counter + usage stats
+    allow read: if d == 'site' || isAdmin();
+    allow create, update: if request.resource.data.keys().hasOnly(
+      ['views','uniques','random','resumes','t_classic','t_compact','t_modern','t_bold']);
+  }
+}}
